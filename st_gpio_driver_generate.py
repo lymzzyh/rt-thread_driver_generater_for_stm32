@@ -3,10 +3,10 @@ import xml.dom.minidom
 import re
 import datetime
 
-def get_header_info(Chip):
+def get_header_info(filename, Chip):
     return '''
  /*
- * File      : drv_gpio.c
+ * File      : ''' + filename + '''
  * 
  * This file is auto generate from cubemx xml for ''' + Chip + ''' 
  *
@@ -16,10 +16,34 @@ def get_header_info(Chip):
  */
 '''
 
+gpio_h_template_header_string = '''
+#ifndef __DRV_GPIO_H__
+#define __DRV_GPIO_H__
+
+#if defined(__cplusplus)||defined(c_plusplus)
+extern "C"{
+#endif
+
+'''
+
+gpio_h_template_end_string = '''
+
+extern int rt_hw_pin_init(void);
+
+#if defined(__cplusplus)||defined(c_plusplus)
+}
+#endif
+
+#endif
+
+'''
+
 gpio_template_header_string = '''
 #include <rthw.h>
 #include <rtdevice.h>
 #include <board.h>
+#include <drv_gpio.h>
+
 #ifdef RT_USING_PIN
 #define __STM32_PIN(index, gpio, gpio_index) (gpio | gpio_index)
 #define __STM32_PIN_DEFAULT 0
@@ -539,13 +563,13 @@ def get_pin_string(index, port, no):
     return '    __STM32_PIN(' + index +', ' + port + ', ' + no+ '),\n'
 
 
-def generate_gpio_driver_by_cube_xml(xml_path, save_path):
+def generate_gpio_driver_by_cube_xml(xml_path, save_path, header_path):
     Document = xml.dom.minidom.parse(xml_path)
     Elements = Document.getElementsByTagName('Pin')
     pattern = 'P([A-Z])([0-9]{1,})'
     with open(save_path ,'w') as f:
         mcu = Document.getElementsByTagName('Mcu')
-        f.write(get_header_info(mcu[0].getAttribute('RefName')))
+        f.write(get_header_info(save_path, mcu[0].getAttribute('RefName')))
         f.write(gpio_template_header_string)
         f.write(default_pin_string)
         for pin in Elements:
@@ -557,8 +581,20 @@ def generate_gpio_driver_by_cube_xml(xml_path, save_path):
                 no = match.group(2)
                 f.write(get_pin_string(pin.getAttribute('Position'), group, no))
         f.write(gpio_template_end_string)
+    pattern = '[A-Z]'
+    with open(header_path ,'w') as f:
+        mcu = Document.getElementsByTagName('Mcu')
+        f.write(get_header_info(header_path, mcu[0].getAttribute('RefName')))
+        f.write(gpio_h_template_header_string)
+        i = 1
+        for pin in Elements:
+            if pin.getAttribute('Type') == 'I/O':
+                if re.match(pattern, pin.getAttribute('Position')):
+                    f.write('#define ' + pin.getAttribute('Position') + ' (' + str(i) + 'UL)' + '\n')
+            i += 1
+        f.write(gpio_h_template_end_string)
 
 import sys
 
 if __name__ == '__main__':
-    generate_gpio_driver_by_cube_xml(sys.argv[1],'drv_gpio.c')
+    generate_gpio_driver_by_cube_xml(sys.argv[1],'drv_gpio.c', 'drv_gpio.h')
