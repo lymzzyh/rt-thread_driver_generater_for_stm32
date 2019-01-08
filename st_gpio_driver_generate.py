@@ -189,28 +189,29 @@ gpio_template_end_string = '''
 
 struct pin_irq_map
 {
-    rt_uint16_t pinbit;
-    IRQn_Type irqno;
+    rt_uint16_t irq_stat;
+    const rt_uint16_t pinbit;
+    const IRQn_Type irqno;
 };
 
-static const struct pin_irq_map pin_irq_map[] =
+static struct pin_irq_map pin_irq_map[] =
 {
-    {GPIO_PIN_0, EXTI0_IRQn},
-    {GPIO_PIN_1, EXTI1_IRQn},
-    {GPIO_PIN_2, EXTI2_IRQn},
-    {GPIO_PIN_3, EXTI3_IRQn},
-    {GPIO_PIN_4, EXTI4_IRQn},
-    {GPIO_PIN_5, EXTI9_5_IRQn},
-    {GPIO_PIN_6, EXTI9_5_IRQn},
-    {GPIO_PIN_7, EXTI9_5_IRQn},
-    {GPIO_PIN_8, EXTI9_5_IRQn},
-    {GPIO_PIN_9, EXTI9_5_IRQn},
-    {GPIO_PIN_10, EXTI15_10_IRQn},
-    {GPIO_PIN_11, EXTI15_10_IRQn},
-    {GPIO_PIN_12, EXTI15_10_IRQn},
-    {GPIO_PIN_13, EXTI15_10_IRQn},
-    {GPIO_PIN_14, EXTI15_10_IRQn},
-    {GPIO_PIN_15, EXTI15_10_IRQn},
+    {0, GPIO_PIN_0, EXTI0_IRQn},
+    {0, GPIO_PIN_1, EXTI1_IRQn},
+    {0, GPIO_PIN_2, EXTI2_IRQn},
+    {0, GPIO_PIN_3, EXTI3_IRQn},
+    {0, GPIO_PIN_4, EXTI4_IRQn},
+    {0, GPIO_PIN_5, EXTI9_5_IRQn},
+    {0, GPIO_PIN_6, EXTI9_5_IRQn},
+    {0, GPIO_PIN_7, EXTI9_5_IRQn},
+    {0, GPIO_PIN_8, EXTI9_5_IRQn},
+    {0, GPIO_PIN_9, EXTI9_5_IRQn},
+    {0, GPIO_PIN_10, EXTI15_10_IRQn},
+    {0, GPIO_PIN_11, EXTI15_10_IRQn},
+    {0, GPIO_PIN_12, EXTI15_10_IRQn},
+    {0, GPIO_PIN_13, EXTI15_10_IRQn},
+    {0, GPIO_PIN_14, EXTI15_10_IRQn},
+    {0, GPIO_PIN_15, EXTI15_10_IRQn},
 };
 
 struct rt_pin_irq_hdr pin_irq_hdr_tab[] =
@@ -307,16 +308,6 @@ static void stm32_pin_mode(rt_device_t dev, rt_base_t pin, rt_base_t mode)
     HAL_GPIO_Init(get_st_gpio(gpio_pin), &GPIO_InitStruct);
 }
 
-static const struct pin_irq_map *get_pin_irq_map(rt_uint16_t gpio_pin)
-{
-    rt_int32_t mapindex = gpio_pin & 0xFF;
-    if (mapindex < 0 || mapindex >= ITEM_NUM(pin_irq_map))
-    {
-        return RT_NULL;
-    }
-    return &pin_irq_map[mapindex];
-};
-
 static rt_err_t stm32_pin_attach_irq(struct rt_device *device, rt_int32_t pin,
                               rt_uint32_t mode, void (*hdr)(void *args), void *args)
 {
@@ -410,7 +401,6 @@ static rt_err_t stm32_pin_irq_enable(struct rt_device *device, rt_base_t pin,
                               rt_uint32_t enabled)
 {
     rt_uint16_t gpio_pin;
-    const struct pin_irq_map *irqmap;
     rt_base_t level;
     rt_int32_t irqindex = -1;
     
@@ -419,36 +409,56 @@ static rt_err_t stm32_pin_irq_enable(struct rt_device *device, rt_base_t pin,
     {
         return RT_ENOSYS;
     }
+    irqindex = gpio_pin&0xFF;
+    if (irqindex < 0 || irqindex >= ITEM_NUM(pin_irq_map))
+    {
+        return RT_ENOSYS;
+    }
+    if (pin_irq_hdr_tab[irqindex].pin == -1)
+    {
+        return RT_ENOSYS;
+    }
     if (enabled == PIN_IRQ_ENABLE)
     {
-        irqindex = gpio_pin&0xFF;
-        if (irqindex < 0 || irqindex >= ITEM_NUM(pin_irq_map))
-        {
-            return RT_ENOSYS;
-        }
         level = rt_hw_interrupt_disable();
-        if (pin_irq_hdr_tab[irqindex].pin == -1)
-        {
-            rt_hw_interrupt_enable(level);
-            return RT_ENOSYS;
-        }
-        irqmap = &pin_irq_map[irqindex];
-        HAL_NVIC_ClearPendingIRQ(irqmap->irqno);
+        
+        HAL_NVIC_ClearPendingIRQ(pin_irq_map[irqindex].irqno);
         __HAL_GPIO_EXTI_CLEAR_IT(irqindex);
         __HAL_GPIO_EXTI_CLEAR_FLAG(irqindex);
-        HAL_NVIC_SetPriority(irqmap->irqno, 5, 0);
-        HAL_NVIC_EnableIRQ(irqmap->irqno);
+        HAL_NVIC_SetPriority(pin_irq_map[irqindex].irqno, 5, 0);
+        HAL_NVIC_EnableIRQ(pin_irq_map[irqindex].irqno);
+        pin_irq_map[irqindex].irq_stat = 1;
         rt_hw_interrupt_enable(level);
     }
     else if (enabled == PIN_IRQ_DISABLE)
     {
-        irqmap = get_pin_irq_map(gpio_pin);
-        if (irqmap == RT_NULL)
+        pin_irq_map[irqindex].irq_stat = 0;
+        if(irqindex <= 9 && irqindex >= 5)
         {
-            return RT_ENOSYS;
+            if(pin_irq_map[5].irq_stat == 0 && pin_irq_map[6].irq_stat == 0 &&
+               pin_irq_map[7].irq_stat == 0 && pin_irq_map[8].irq_stat == 0 && 
+               pin_irq_map[9].irq_stat == 0)
+            {
+                HAL_NVIC_DisableIRQ(pin_irq_map[irqindex].irqno);
+                HAL_NVIC_ClearPendingIRQ(pin_irq_map[irqindex].irqno);
+            }
         }
-        HAL_NVIC_DisableIRQ(irqmap->irqno);
-        HAL_NVIC_ClearPendingIRQ(irqmap->irqno);
+        else if(irqindex >= 10)
+        {
+            if(pin_irq_map[10].irq_stat == 0 && pin_irq_map[11].irq_stat == 0 &&
+               pin_irq_map[12].irq_stat == 0 && pin_irq_map[13].irq_stat == 0 && 
+               pin_irq_map[14].irq_stat == 0 && pin_irq_map[15].irq_stat == 0)
+            {
+                HAL_NVIC_DisableIRQ(pin_irq_map[irqindex].irqno);
+                HAL_NVIC_ClearPendingIRQ(pin_irq_map[irqindex].irqno);
+            }
+        }
+        else
+        {
+            HAL_NVIC_DisableIRQ(pin_irq_map[irqindex].irqno);
+            HAL_NVIC_ClearPendingIRQ(pin_irq_map[irqindex].irqno);
+        }
+       
     }
     else
     {
@@ -486,7 +496,8 @@ static void pin_irq_hdr(uint16_t GPIO_Pin)
         }
     }
     if(irqno == 16)return;
-    if (pin_irq_hdr_tab[irqno].hdr)
+
+    if (pin_irq_map[irqno].irq_stat && pin_irq_hdr_tab[irqno].hdr)
     {
         pin_irq_hdr_tab[irqno].hdr(pin_irq_hdr_tab[irqno].args);
     }
